@@ -1,133 +1,149 @@
-const MINUTE = 60
-const HOUR = MINUTE * 60
-const DAY = HOUR * 24
-const WEEK = DAY * 7
-const MONTH = DAY * 30
-const YEAR = DAY * 365
+import defaultConverter from './converter'
 
-function pluralOrSingular(data, locale) {
-  if (data === 'just now') {
-    return locale
-  }
-  const count = Math.round(data)
-  if (Array.isArray(locale)) {
-    return count > 1
-      ? locale[1].replace(/%s/, count)
-      : locale[0].replace(/%s/, count)
-  }
-  return locale.replace(/%s/, count)
-}
+export const createTimeago = (opts = {}) => {
+  const locales = opts.locales || {}
+  const name = opts.name || 'Timeago'
 
-function formatTime(time) {
-  const d = new Date(time)
-  return d.toLocaleString()
-}
+  return {
+    name,
 
-export default function install(
-  Vue,
-  { name = 'timeago', locale = 'en-US', locales = null } = {}
-) {
-  if (!locales || Object.keys(locales).length === 0) {
-    throw new TypeError('Expected locales to have at lease one locale.')
-  }
-
-  const VueTimeago = {
     props: {
-      since: {
+      datetime: {
         required: true
       },
-      locale: String,
-      maxTime: Number,
-      autoUpdate: Number,
-      format: Function
+      title: {
+        type: [String, Boolean]
+      },
+      locale: {
+        type: String
+      },
+      autoUpdate: {
+        type: [Number, Boolean]
+      },
+      converter: {
+        type: Function
+      },
+      converterOptions: {
+        type: Object
+      }
     },
+
     data() {
       return {
-        now: new Date().getTime()
+        timeago: this.getTimeago()
       }
     },
+
     computed: {
-      currentLocale() {
-        const current = locales[this.locale || locale]
-        if (!current) {
-          return locales[locale]
-        }
-        return current
-      },
-      sinceTime() {
-        return new Date(this.since).getTime()
-      },
-      timeago() {
-        const seconds = this.now / 1000 - this.sinceTime / 1000
-
-        if (this.maxTime && seconds > this.maxTime) {
-          clearInterval(this.interval)
-          return this.format
-            ? this.format(this.sinceTime)
-            : formatTime(this.sinceTime)
-        }
-
-        const ret = seconds <= 5
-          ? pluralOrSingular('just now', this.currentLocale[0])
-          : seconds < MINUTE
-            ? pluralOrSingular(seconds, this.currentLocale[1])
-            : seconds < HOUR
-              ? pluralOrSingular(seconds / MINUTE, this.currentLocale[2])
-              : seconds < DAY
-                ? pluralOrSingular(seconds / HOUR, this.currentLocale[3])
-                : seconds < WEEK
-                  ? pluralOrSingular(seconds / DAY, this.currentLocale[4])
-                  : seconds < MONTH
-                    ? pluralOrSingular(seconds / WEEK, this.currentLocale[5])
-                    : seconds < YEAR
-                      ? pluralOrSingular(seconds / MONTH, this.currentLocale[6])
-                      : pluralOrSingular(seconds / YEAR, this.currentLocale[7])
-
-        return ret
+      localeName() {
+        return this.locale || this.$timeago.locale
       }
     },
+
     mounted() {
-      if (this.autoUpdate) {
-        this.update()
-      }
+      this.startUpdater()
     },
+
+    beforeDestroy() {
+      this.stopUpdater()
+    },
+
     render(h) {
       return h(
         'time',
         {
           attrs: {
-            datetime: new Date(this.since)
+            datetime: new Date(this.datetime),
+            title:
+              typeof this.title === 'string'
+                ? this.title
+                : this.title === false
+                ? null
+                : this.timeago
           }
         },
-        this.timeago
+        [this.timeago]
       )
     },
-    watch: {
-      autoUpdate(newAutoUpdate) {
-        this.stopUpdate()
-        // only update when it's not falsy value
-        // which means you cans set it to 0 to disable auto-update
-        if (newAutoUpdate) {
-          this.update()
+
+    methods: {
+      getTimeago(datetime) {
+        const converter = this.converter || opts.converter || defaultConverter
+        return converter(
+          datetime || this.datetime,
+          locales[this.locale || this.$timeago.locale],
+          this.converterOptions || {}
+        )
+      },
+
+      convert(datetime) {
+        this.timeago = this.getTimeago(datetime)
+      },
+
+      startUpdater() {
+        if (this.autoUpdate) {
+          const autoUpdaye = this.autoUpdate === true ? 60 : this.autoUpdate
+          this.updater = setInterval(() => {
+            this.convert()
+          }, autoUpdaye * 1000)
+        }
+      },
+
+      stopUpdater() {
+        if (this.updater) {
+          clearInterval(this.updater)
+          this.updater = null
         }
       }
     },
-    methods: {
-      update() {
-        const period = this.autoUpdate * 1000
-        this.interval = setInterval(() => {
-          this.now = new Date().getTime()
-        }, period)
+
+    watch: {
+      autoUpdate(newValue) {
+        this.stopUpdater()
+        if (newValue) {
+          this.startUpdater()
+        }
       },
-      stopUpdate() {
-        clearInterval(this.interval)
-        this.interval = null
+
+      datetime() {
+        this.convert()
+      },
+      localeName() {
+        this.convert()
+      },
+      converter() {
+        this.convert()
+      },
+      converterOptions: {
+        handler() {
+          this.convert()
+        },
+        deep: true
       }
-    },
-    beforeDestroy() {
-      this.stopUpdate()
     }
   }
-
-  Vue.component(name, VueTimeago)
 }
+
+export const install = (Vue, opts) => {
+  if (Vue.prototype.$timeago) {
+    return
+  }
+
+  if (process.env.NODE_ENV === 'development' && !Vue.observable) {
+    console.warn(`[vue-timeago] Vue 2.6 or above is recommended.`)
+  }
+
+  const $timeago = {
+    locale: opts.locale
+  }
+  Vue.prototype.$timeago = Vue.observable
+    ? Vue.observable($timeago)
+    : new Vue({ data: $timeago })
+
+  const Component = createTimeago(opts)
+  Vue.component(Component.name, Component)
+}
+
+export const converter = defaultConverter
+
+export default install

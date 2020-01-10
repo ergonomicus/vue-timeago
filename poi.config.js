@@ -1,6 +1,12 @@
 module.exports = {
-  entry: 'example',
-  dist: 'dist-demo',
-  homepage: '/vue-timeago/',
-  postcss: [require('postcss-nested')]
+  configureWebpack: {
+    module: {
+      rules: [
+        {
+          resourceQuery: /blockType=readme/,
+          loader: require.resolve('./example/vue-readme-loader')
+        }
+      ]
+    }
+  }
 }
